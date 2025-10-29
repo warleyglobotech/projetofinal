@@ -1,16 +1,16 @@
 # Projeto Final - WordPress com EC2, ASG, EFS e RDS
 
-[cite_start]Este projeto implanta a arquitetura completa solicitada na Aula 4 , usando CloudFormation.
+Este projeto implanta a arquitetura completa solicitada no módulo de Infraestrutura como Código, usando CloudFormation.
 
 A infraestrutura provisiona:
 * **Rede (VPC):** Uma nova VPC com sub-redes públicas (para o ALB) e privadas (para EC2 e RDS) em duas Zonas de Disponibilidade.
 * **Gateways:** Um Internet Gateway (para o público) e um NAT Gateway (para o privado acessar a internet para atualizações).
-* [cite_start]**Balanceador (ALB):** Um Application Load Balancer nas sub-redes públicas[cite: 964].
-* [cite_start]**Computação (EC2/ASG):** Um Auto Scaling Group (ASG) que gerencia instâncias EC2 [cite: 962] nas sub-redes privadas.
-* [cite_start]**Política de Scaling:** Uma política de Target Tracking Scaling baseada em CPU.
-* [cite_start]**Armazenamento (EFS):** Um Amazon EFS para persistir os arquivos do WordPress (`/var/www/html`).
-* [cite_start]**Banco de Dados (RDS):** Uma instância de banco de dados MySQL Multi-AZ (Amazon RDS) em sub-redes privadas.
-* [cite_start]**Segurança (Security Groups):** Grupos de segurança com regras de "menor privilégio".
+* **Balanceador (ALB):** Um Application Load Balancer nas sub-redes públicas.
+* **Computação (EC2/ASG):** Um Auto Scaling Group (ASG) que gerencia instâncias EC2 nas sub-redes privadas.
+* **Política de Scaling:** Uma política de Target Tracking Scaling baseada em CPU.
+* **Armazenamento (EFS):** Um Amazon EFS para persistir os arquivos do WordPress (`/var/www/html`).
+* **Banco de Dados (RDS):** Uma instância de banco de dados MySQL Multi-AZ (Amazon RDS) em sub-redes privadas.
+* **Segurança (Security Groups):** Grupos de segurança com regras de "menor privilégio".
 
 ## Pré-requisitos
 
