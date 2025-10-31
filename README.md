@@ -1,42 +1,41 @@
-# Projeto Final - WordPress com EC2, ASG, EFS e RDS
+# provisionamentoComoCodigo.trabFinal
 
-Este projeto implanta a arquitetura completa solicitada no módulo de Infraestrutura como Código, usando CloudFormation.
+Grupo: Rafael, Maria Emília e Warley
 
-A infraestrutura provisiona:
-* **Rede (VPC):** Uma nova VPC com sub-redes públicas (para o ALB) e privadas (para EC2 e RDS) em duas Zonas de Disponibilidade.
-* **Gateways:** Um Internet Gateway (para o público) e um NAT Gateway (para o privado acessar a internet para atualizações).
-* **Balanceador (ALB):** Um Application Load Balancer nas sub-redes públicas.
-* **Computação (EC2/ASG):** Um Auto Scaling Group (ASG) que gerencia instâncias EC2 nas sub-redes privadas.
-* **Política de Scaling:** Uma política de Target Tracking Scaling baseada em CPU.
-* **Armazenamento (EFS):** Um Amazon EFS para persistir os arquivos do WordPress (`/var/www/html`).
-* **Banco de Dados (RDS):** Uma instância de banco de dados MySQL Multi-AZ (Amazon RDS) em sub-redes privadas.
-* **Segurança (Security Groups):** Grupos de segurança com regras de "menor privilégio".
+O Projeto Final consiste em criar uma estrutura através do AWS CloudFormation. Precisa conter os seguintes serviços:
 
-## Pré-requisitos
+- Amazon EC2; (obrigatorio)
+- Auto Scaling em duas AZ's (com política de scaling); (obrigatorio)
+- Elastic Load Balancer em duas AZ's;(obrigatorio)
+- Amazon RDS;
+- Amazon EFS;
+- Security Groups garantindo o menor privilégio necessário para os respectivos recursos; (obrigatorio)
 
-1.  Uma conta AWS.
-2.  Um Par de Chaves (Key Pair) EC2 já existente na região. Você precisará do nome dele para o parâmetro `KeyName`.
+É pretendido mostrar a instância funcionando mesmo ao desligarmos uma das EC2.
 
-## Passos para Implantação
+OBS: Nosso código copia uma aplicação HTML (jogo da velha) de um bucket S3 (`s3://jogo-da-velha-projeto-final/`) para o EFS.
 
-### 1. Obter seu Endereço IP
+## Como Implantar
 
-Para segurança, a pilha só permite acesso SSH às instâncias a partir do seu IP. Descubra seu IP (Google "what is my ip") e anote-o.
+1.  **Bucket S3:** Este template assume que o bucket `jogo-da-velha-projeto-final` e os arquivos da aplicação já existem.
 
-### 2. Implantar a Pilha (Stack)
+2.  **Implantação via AWS CLI:**
 
-Use o arquivo `projeto-final-completo.yml`.
+    ```bash
+    aws cloudformation deploy \
+      --template-file cloud-formation-corrigido.yaml \
+      --stack-name projeto-final-grupo \
+      --capabilities CAPABILITY_IAM \
+      --parameter-overrides \
+        KeyName=SEU_PAR_DE_CHAVES \
+        SSHLocation=SEU_IP_PUBLICO/32 \
+        DBPassword=UmaSenhaForteParaSeuBanco
+    ```
 
-#### Opção A: AWS CLI (Recomendado)
-
-Substitua os valores de `SUA_SENHA_SEGURA`, `NOME_DA_SUA_CHAVE_SSH` e `SEU_IP_PUBLICO/32`.
-
-```bash
-aws cloudformation deploy \
-  --template-file projeto-final-completo.yml \
-  --stack-name projeto-final-wordpress \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides \
-    DBMasterPassword=SUA_SENHA_SEGURA \
-    KeyName=NOME_DA_SUA_CHAVE_SSH \
-    SSHLocation=SEU_IP_PUBLICO/32
+3.  **Implantação via Console:**
+    * Faça o upload do `cloud-formation-corrigido.yaml`.
+    * Preencha os parâmetros:
+        * `KeyName`: O nome do seu par de chaves EC2.
+        * `SSHLocation`: Seu IP (ex: `190.170.160.150/32`).
+        * `DBPassword`: Crie uma senha para o banco de dados.
+    * Marque a caixa "Eu reconheço que o AWS CloudFormation pode criar recursos do IAM."
