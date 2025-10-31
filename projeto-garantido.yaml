@@ -1,31 +1,30 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: |
-  Projeto Final - Academia Globotech.
-  Esta stack cria uma arquitetura web de alta disponibilidade com ALB e Auto Scaling Group
-  em duas Zonas de Disponibilidade.
+Description: Projeto Final - Infraestrutura AWS na Virginia (Versão Corrigida com Menor Privilégio)
 
 Parameters:
+  KeyName:
+    Description: Nome do Key Pair para acessar EC2
+    Type: AWS::EC2::KeyPair::KeyName
+
   SSHLocation:
-    Description: O endereco IP que pode fazer SSH nas instancias EC2.
+    Description: O endereco IP que pode fazer SSH (ex: 1.2.3.4/32).
     Type: String
     MinLength: 9
     MaxLength: 18
     Default: 0.0.0.0/0
     AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
-    ConstraintDescription: deve ser um range de IP valido no formato x.x.x.x/x.
 
-  # Parametro para o ID da Imagem
-  LatestAmiId:
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Description: O ID da AMI mais recente do Amazon Linux 2.
-    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  DBPassword:
+    Description: Senha para o banco de dados RDS.
+    Type: String
+    NoEcho: true
+    MinLength: 8
 
 Resources:
-  # 1. REDE (VPC, Subnets, Internet Gateway, Route Tables)
+  # 1. REDE
   VPC:
-    Type: AWS::EC2::VPC
+    Type: "AWS::EC2::VPC"
     Properties:
-      CidrBlock: 10.0.0.0/16
+      CidrBlock: "10.0.0.0/16"
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
@@ -33,172 +32,327 @@ Resources:
           Value: !Sub ${AWS::StackName}-VPC
 
   InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-IGW
+    Type: "AWS::EC2::InternetGateway"
 
-  VPCGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
+  AttachGateway:
+    Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
 
-  PublicSubnetA:
-    Type: AWS::EC2::Subnet
+  # Sub-redes Públicas (Para Load Balancer e NAT Gateway)
+  PublicSubnet1:
+    Type: "AWS::EC2::Subnet"
     Properties:
       VpcId: !Ref VPC
-      CidrBlock: 10.0.1.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: "10.0.1.0/24"
+      AvailabilityZone: "us-east-1a"
       MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-PublicSubnet-A
 
-  PublicSubnetB:
-    Type: AWS::EC2::Subnet
+  PublicSubnet2:
+    Type: "AWS::EC2::Subnet"
     Properties:
       VpcId: !Ref VPC
-      CidrBlock: 10.0.2.0/24
-      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: "10.0.2.0/24"
+      AvailabilityZone: "us-east-1b"
       MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-PublicSubnet-B
 
+  # Sub-redes Privadas (Para EC2, RDS, EFS)
+  PrivateSubnet1:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.10.0/24"
+      AvailabilityZone: "us-east-1a"
+      MapPublicIpOnLaunch: false
+
+  PrivateSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.11.0/24"
+      AvailabilityZone: "us-east-1b"
+      MapPublicIpOnLaunch: false
+
+  # Roteamento Público
   PublicRouteTable:
-    Type: AWS::EC2::RouteTable
+    Type: "AWS::EC2::RouteTable"
     Properties:
       VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-PublicRouteTable
 
   PublicRoute:
-    Type: AWS::EC2::Route
-    DependsOn: VPCGatewayAttachment
+    Type: "AWS::EC2::Route"
     Properties:
       RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
+      DestinationCidrBlock: "0.0.0.0/0"
       GatewayId: !Ref InternetGateway
 
-  PublicSubnetARouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
+  PublicSubnet1RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
     Properties:
-      SubnetId: !Ref PublicSubnetA
+      SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
 
-  PublicSubnetBRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
+  PublicSubnet2RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
     Properties:
-      SubnetId: !Ref PublicSubnetB
+      SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
-  # 2. GRUPOS DE SEGURANCA (Security Groups)
+  # Roteamento Privado (com NAT Gateway)
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1 # NAT Gateway fica na sub-rede pública
+
+  PrivateRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRoute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway # Rota para a internet via NAT
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # 2. SECURITY GROUPS (Princípio do Menor Privilégio)
   LoadBalancerSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+    Type: "AWS::EC2::SecurityGroup"
     Properties:
-      GroupName: !Sub ${AWS::StackName}-LBSG
-      GroupDescription: "Habilita acesso HTTP para o Load Balancer"
+      GroupDescription: "Acesso HTTP do público para o ALB"
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
+        - IpProtocol: "tcp"
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
+          CidrIp: "0.0.0.0/0" # Libera HTTP externo SÓ para o ALB
 
-  EC2SecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+  InstanceSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
     Properties:
-      GroupName: !Sub ${AWS::StackName}-EC2SG
-      GroupDescription: "Habilita acesso para as instancias EC2"
+      GroupDescription: "Acesso do ALB (HTTP) e do Admin (SSH)"
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
+        - IpProtocol: "tcp"
           FromPort: 22
           ToPort: 22
-          CidrIp: !Ref SSHLocation
+          CidrIp: !Ref SSHLocation # Libera SSH SÓ para o seu IP
+        - IpProtocol: "tcp"
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup # Libera HTTP SÓ do ALB
 
-  # 3. LOAD BALANCER (ALB)
-  ApplicationLoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  EFSSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
     Properties:
-      Name: !Sub ${AWS::StackName}-ALB
-      Subnets:
-        - !Ref PublicSubnetA
-        - !Ref PublicSubnetB
-      SecurityGroups:
-        - !Ref LoadBalancerSecurityGroup
-      Scheme: internet-facing
-      Type: application
+      GroupDescription: "Permite NFS (2049) da EC2 para EFS"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref InstanceSecurityGroup # SÓ EC2s podem acessar NFS
 
-  ALBTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  MyDBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
     Properties:
-      Name: !Sub ${AWS::StackName}-TG
+      GroupDescription: "Security Group RDS"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref InstanceSecurityGroup # SÓ a aplicação acessa o banco
+
+  # 3. IAM (Corrigindo o Hardcoding)
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - 'arn:aws:s3:::jogo-da-velha-projeto-final'
+                  - 'arn:aws:s3:::jogo-da-velha-projeto-final/*'
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+
+  # 4. LOAD BALANCER (ALB)
+  LoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: "ProjetoFinalELB"
+      Subnets: [ !Ref PublicSubnet1, !Ref PublicSubnet2 ] # ALB fica na rede pública
+      SecurityGroups: [ !Ref LoadBalancerSecurityGroup ] # Usa o SG do ALB
+      Scheme: "internet-facing"
+      Type: "application"
+
+  TargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
       VpcId: !Ref VPC
       Port: 80
-      Protocol: HTTP
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: /index.html
-      TargetType: instance
+      Protocol: "HTTP"
+      TargetType: "instance"
+      HealthCheckPath: "/"
+      HealthCheckProtocol: "HTTP"
 
-  ALBListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
+  Listener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
     Properties:
       DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref ALBTargetGroup
-      LoadBalancerArn: !Ref ApplicationLoadBalancer
+        - Type: "forward"
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
       Port: 80
-      Protocol: HTTP
+      Protocol: "HTTP"
 
-  # 4. EC2 INSTANCIAS COM AUTO SCALING
-  EC2LaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
+  # 5. EFS (Sistema de Arquivos)
+  MyEFS:
+    Type: "AWS::EFS::FileSystem"
     Properties:
-      LaunchTemplateName: !Sub ${AWS::StackName}-LaunchTemplate
+      Encrypted: false
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-EFS
+
+  MyEFSMountTarget1:
+    Type: "AWS::EFS::MountTarget"
+    Properties:
+      FileSystemId: !Ref MyEFS
+      SubnetId: !Ref PrivateSubnet1 # Mount Target na rede privada
+      SecurityGroups: [ !Ref EFSSecurityGroup ]
+
+  MyEFSMountTarget2:
+    Type: "AWS::EFS::MountTarget"
+    Properties:
+      FileSystemId: !Ref MyEFS
+      SubnetId: !Ref PrivateSubnet2 # Mount Target na rede privada
+      SecurityGroups: [ !Ref EFSSecurityGroup ]
+
+  # 6. EC2 (Launch Template e Auto Scaling)
+  LaunchTemplate:
+    Type: "AWS::EC2::LaunchTemplate"
+    Properties:
       LaunchTemplateData:
-        ImageId: !Ref LatestAmiId # USA O PARAMETRO PARA ACHAR A AMI SOZINHO
-        InstanceType: t2.micro
-        SecurityGroupIds:
-          - !Ref EC2SecurityGroup
+        ImageId: "ami-080e1f13689e07408" # AMI Ubuntu
+        InstanceType: "t3.micro"
+        IamInstanceProfile:
+          Name: !Ref EC2InstanceProfile # Corrigido: Referencia o Profile criado na stack
+        SecurityGroupIds: [ !Ref InstanceSecurityGroup ]
+        KeyName: !Ref KeyName
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
-            yum update -y
-            yum install -y httpd
-            systemctl start httpd
-            systemctl enable httpd
-            echo "<h1>Projeto Final Garantido! Pagina servida pela instancia: $(curl -s http://169.254.169.254/latest/meta-data/instance-id)</h1>" > /var/www/html/index.html
+            apt-get update -y
+            apt-get install -y apache2 nfs-common awscli
+            systemctl start apache2
+            systemctl enable apache2
+            
+            mkdir -p /mnt/efs
+            sleep 15
+            tries=0
+            # Monta o EFS
+            until mount -t nfs4 -o nfsvers=4.1 ${MyEFS}.efs.${AWS::Region}.amazonaws.com:/ /mnt/efs; do
+              sleep 10
+              ((tries++))
+              [ $tries -ge 6 ] && break
+            done
+            
+            # Baixa os arquivos do S3 para o EFS (apenas se o EFS estiver vazio)
+            if [ -z "$(ls -A /mnt/efs)" ]; then
+               aws s3 cp s3://jogo-da-velha-projeto-final/jogo-da-velha /mnt/efs/ --recursive
+            fi
+
+            rm -rf /var/www/html
+            ln -s /mnt/efs /var/www/html
+            
+            find /mnt/efs -type d -exec chmod 755 {} \;
+            find /mnt/efs -type f -exec chmod 644 {} \;
 
   AutoScalingGroup:
-    Type: AWS::AutoScaling::AutoScalingGroup
+    Type: "AWS::AutoScaling::AutoScalingGroup"
     Properties:
-      VPCZoneIdentifier:
-        - !Ref PublicSubnetA
-        - !Ref PublicSubnetB
+      VPCZoneIdentifier: [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ] # EC2s na rede privada
       LaunchTemplate:
-        LaunchTemplateId: !Ref EC2LaunchTemplate
-        Version: !GetAtt EC2LaunchTemplate.LatestVersionNumber
-      MinSize: '2'
-      MaxSize: '3'
-      DesiredCapacity: '2'
-      TargetGroupARNs:
-        - !Ref ALBTargetGroup
-      HealthCheckType: ELB
-      HealthCheckGracePeriod: 300
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-EC2-Instance
-          PropagateAtLaunch: true
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: "2"
+      MaxSize: "4"
+      DesiredCapacity: "2"
+      TargetGroupARNs: [ !Ref TargetGroup ]
+      HealthCheckType: "ELB"
+
+  ScaleUpPolicy:
+    Type: "AWS::AutoScaling::ScalingPolicy"
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: "TargetTrackingScaling"
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ASGAverageCPUUtilization"
+        TargetValue: 50.0
+
+  # 7. RDS (Banco de Dados)
+  MyDBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: "Grupo de subnets privadas para o RDS"
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  MyDBInstance:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      AllocatedStorage: "20"
+      DBInstanceClass: "db.t3.micro"
+      Engine: "mysql"
+      MasterUsername: "admin"
+      MasterUserPassword: !Ref DBPassword # Corrigido: Usa o Parâmetro
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      VPCSecurityGroups: [ !Ref MyDBSecurityGroup ]
+      PubliclyAccessible: false # Corrigido: Não é acessível publicamente
+      MultiAZ: false # Para economizar custos; mude para 'true' para HA real do banco
 
 Outputs:
   LoadBalancerDNS:
-    Description: O endereco DNS do Application Load Balancer para acessar a aplicacao
-    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Description: "DNS do Load Balancer"
+    Value: !GetAtt LoadBalancer.DNSName
