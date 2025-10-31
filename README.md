@@ -17,7 +17,7 @@ OBS: Nosso código copia uma aplicação HTML (jogo da velha) de um bucket S3 (`
 
 ## Como Implantar
 
-1.  **Bucket S3:** Este template assume que o bucket `jogo-da-velha-projeto-final` e os arquivos da aplicação já existem.
+1.  **Bucket S3:** Este template assume que o bucket `s3://jogo-da-velha-projeto-final` e os arquivos da aplicação já existem.
 
 2.  **Implantação via AWS CLI:**
 
